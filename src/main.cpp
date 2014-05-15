@@ -14,7 +14,7 @@ int bmp_ok = 0;
 #define ANEM_PIN A1
 
 #define ANEM_INTERVAL 10
-#define ANEM_LEVEL 400
+#define ANEM_ALEVEL 500
 
 // int anem_counter = 0;
 
@@ -37,29 +37,28 @@ int read_vane()
 
 int read_anem() 
 {
-    boolean high = false;
     int count = 0;
-    for(int second=0; second < ANEM_INTERVAL; second++ ) {
-        for(int dm=0; dm < 10; dm++) {
+    boolean high = false;
+    for(int seconds=0; seconds < ANEM_INTERVAL; seconds++ ) 
+    {
+        // one second cycle
+        for(int dm=0; dm < 100; dm++) {
             int v = analogRead(ANEM_PIN);
-            Serial.print("a:"); Serial.print(v); Serial.println();
-
-            if(v > ANEM_LEVEL) {
-                if(!high){ high = true; count++; }
+            if(v > ANEM_ALEVEL) {
+                if(!high){ high = true; }
             }
             else {
-                if(high) { high = false; }
+                if(high) { high = false; count++; }
             }
-
-            delay(100);
+            delay(10);
         }
     }
+    return count;
 }
 
 
-void loop()
+void read_dht22()
 {
-  // READ DATA
   Serial.print("DHT: ");
   int chk = dht.read22(DHT22_PIN);
   switch (chk)
@@ -83,16 +82,17 @@ void loop()
   Serial.print("  h=");  
   Serial.print(dht.humidity, 1);
   Serial.println();  
+}
 
-  delay(1000);
-
+void read_bmp()
+{
   // read_bmp
 
-// Connect VCC of the BMP085 sensor to 3.3V (NOT 5.0V!)
-// Connect GND to Ground
-// Connect SCL to i2c clock - on '168/'328 Arduino Uno/Duemilanove/etc thats Analog 5
-// Connect SDA to i2c data - on '168/'328 Arduino Uno/Duemilanove/etc thats Analog 4
-// SCL -> D3, SDA -> D2 on Lennardo
+  // Connect VCC of the BMP085 sensor to 3.3V (NOT 5.0V!)
+  // Connect GND to Ground
+  // Connect SCL to i2c clock - on '168/'328 Arduino Uno/Duemilanove/etc thats Analog 5
+  // Connect SDA to i2c data - on '168/'328 Arduino Uno/Duemilanove/etc thats Analog 4
+  // SCL -> D3, SDA -> D2 on Lennardo
 
     Serial.print("bmp_ok: "); Serial.print(bmp_ok);
     Serial.println();
@@ -105,27 +105,22 @@ void loop()
     Serial.print(bmp.readPressure());
     Serial.println(" Pa");
     
-    // Calculate altitude assuming 'standard' barometric
-    // pressure of 1013.25 millibar = 101325 Pascal
-    Serial.print("Altitude = ");
-    Serial.print(bmp.readAltitude());
-    Serial.println(" meters");
-
-  // you can get a more precise measurement of altitude
-  // if you know the current sea level pressure which will
-  // vary with weather and such. If it is 1015 millibars
-  // that is equal to 101500 Pascals.
-    Serial.print("Real altitude = ");
-    Serial.print(bmp.readAltitude(101500));
-    Serial.println(" meters");
-    
     Serial.println();
-    delay(1000);
+}
 
+
+void loop()
+{
+/*
+    read_dht22();
+    read_bmp();
+
+    int w = read_anem();
+    Serial.print("w: "); Serial.print(w); Serial.println();
+*/    
+    int va = read_vane();
+    Serial.print("va: "); Serial.print(va); Serial.println();
+    delay(10);
 }
 
 //.
-
-
-
-
