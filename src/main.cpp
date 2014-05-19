@@ -127,8 +127,6 @@ void loop()
         {
             p_sum += bmp.readPressure()/100.; p_count++;
             t0_sum += bmp.readTemperature(); t0_count++;
-
-            Serial.print("pp: "); Serial.println(bmp.readPressure());
         }
 
     }
@@ -136,8 +134,9 @@ void loop()
     if(t_count) { Serial.print("t: "); Serial.print(t_sum/t_count, 1); Serial.println(); }
     if(h_count) { Serial.print("h: "); Serial.print(h_sum/h_count, 1); Serial.println(); }
     if(p_count) { Serial.print("p: "); Serial.print(p_sum/p_count, 1); Serial.println(); }
-    if(t0_count) { Serial.print("t0: "); Serial.print(t0_sum/t0_count, 1); Serial.println(); }
+    if(t0_count){ Serial.print("t0: ");Serial.print(t0_sum/t0_count,1);Serial.println(); }
     if(w_count) { Serial.print("w: "); Serial.print(w_sum/w_count, 1); Serial.println(); }
+    if(gust) { Serial.print("g: "); Serial.print(gust); Serial.println(); }
 
     // send
    
