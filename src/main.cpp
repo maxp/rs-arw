@@ -8,6 +8,7 @@
 
 #define VERSION "rs_arw 0.2"
 
+#include <math.h>
 #include <Wire.h>
 #include <Adafruit_BMP085.h>
 #include <dht.h>
@@ -25,7 +26,7 @@ Dht dht;
 
 #define ANEM_INTERVAL 10
 #define ANEM_ALEVEL 500
-#define PWRBAT_ALEVEL 200
+#define PWRBAT_ALEVEL 90
 
 #define HOST      "rs.angara.net"
 #define PORT       80
@@ -39,16 +40,21 @@ Dht dht;
 // !!! 30
 #define SEC10_NUM 3
 
-// 150, 108, 274, 197, 394, 346, 689, 668,
-// 868, 809, 840, 735, 785, 512, 561, 135
+// 203, 152, 352, 368, 489, 435, 806, 758
+// 987, 929, 959, 855, 904, 620, 672, 186
 
 #define RHN 16
 
-int RH_A[RHN] = {
-    140, 100, 260, 190, 390, 340, 680, 660,
-    860, 800, 830, 730, 780, 500, 550, 120
+int RH0[RHN] = {
+    193, 120, 300, 361, 460, 400, 780, 700,
+    970, 920, 940, 840, 880, 600, 650, 166
 };
-#define RH_D 20
+
+int RH1[RHN] = {
+    250, 165, 360, 399, 500, 459, 839, 779,
+    999, 939, 969, 879, 919, 649, 699, 192
+};
+
 
 int   cycle = 0;
 
@@ -76,8 +82,12 @@ InetGSM inet;
 char tchar[10];
 char imei[IMEI_LEN+1];
 
-char rbuff[50];
-char ubuff[120];
+
+#define RBUFF_LEN 50
+#define UBUFF_LEN 120
+
+char rbuff[RBUFF_LEN];
+char ubuff[UBUFF_LEN];
 
 //
 
@@ -87,17 +97,23 @@ void setup()
   Serial.begin(9600);
   Serial.println(VERSION);
   pinMode(BLINK_PIN, OUTPUT);
+
+  digitalWrite(ANEM_PIN, HIGH);
+  digitalWrite(VANE_PIN, HIGH);
+  digitalWrite(PWR_PIN, HIGH);
+  digitalWrite(BAT_PIN, HIGH);
 }
 
 
 int read_vane() 
 {
     int a = analogRead(VANE_PIN); 
+
     if(va_min == 0 || a < va_min) { va_min = a; }
     if(a > va_max) { va_max = a; }
 
     for( int i=0; i < RHN; i++ ) {
-        if(RH_A[i] <= a && a < RH_A[i]+RH_D) { return i; }
+        if(RH0[i] <= a && a < RH1[i]) { return i; }
     }
     return -1;
 }
@@ -222,11 +238,6 @@ void loop()
         int r = read_vane();
         if( r >= 0 ) {
             rh[r] += 1;
-
-            Serial.print("r: "); Serial.print(r); 
-            Serial.print(" "); Serial.print(va_min); 
-            Serial.print(" "); Serial.print(va_max); 
-            Serial.println();
         }
 
         if(dht.read22(DHT22_PIN) == DHTLIB_OK)
@@ -240,13 +251,15 @@ void loop()
             p_sum += bmp.readPressure()/100.; p_count++;
             t0_sum += bmp.readTemperature(); t0_count++;
         }
-
-        Serial.print("pwr: "); Serial.println(analogRead(PWR_PIN));
-        Serial.print("bat: "); Serial.println(analogRead(BAT_PIN));
     }
 
     ubuff[0] = 0;
     itoa(cycle, f, 10); strcat(ubuff, "cycle="); strcat(ubuff, f);
+
+    int pwr = 0;
+    if( analogRead(PWR_PIN) > PWRBAT_ALEVEL) { pwr += 1; }; // pwr == 1: no external power
+    if( analogRead(BAT_PIN) > PWRBAT_ALEVEL) { pwr += 2; }; // pwr == 2: battery failure
+    if(pwr) { itoa(pwr, f, 10); strcat(ubuff, "&pwr="); strcat(ubuff, f); }
 
     if(t_count) { 
         dtostrf(t_sum/t_count, 3, 1, f); strcat(ubuff, "&t="); strcat(ubuff, f);
@@ -263,9 +276,36 @@ void loop()
     if(w_count) { 
         dtostrf(w_sum/w_count, 3, 1, f); strcat(ubuff, "&w="); strcat(ubuff, f);
     }
-    if(gust) { 
-        dtostrf(float(gust), 1, 0, f); strcat(ubuff, "&g="); strcat(ubuff, f);
+    if(gust) { itoa(gust, f, 10); strcat(ubuff, "&g="); strcat(ubuff, f); }
+
+    if(va_min || va_max) {
+        strcat(ubuff, "&va_mm="); itoa(va_min, f, 10); strcat(ubuff, f);
+        strcat(ubuff, ","); itoa(va_max, f, 10); strcat(ubuff, f);
     }
+
+    if(w_sum || gust) 
+    {
+        int mpos = -1, mw = 0;
+        for(int i=0; i<RHN; i++) { 
+            if(rh[i] > mw) { mw = rh[i]; mpos = i; } 
+        }
+        if(mpos >= 0) 
+        {
+            float m  = float(mw);
+            float m0 = float(rh[(mpos-1+RHN) % RHN]);
+            float m1 = float(rh[(mpos+1) % RHN]);
+
+            int b = round((float(mpos)-(m0/m*0.5)+(m1/m*0.5))*22.5);
+            strcat(ubuff, "&b="); itoa(b, f, 10); strcat(ubuff, f);
+
+            strcat(ubuff, "&rh=");
+            for(int i=0; i<RHN; i++) { 
+                if(i) { strcat(ubuff, ","); }
+                itoa(rh[i], f, 10); strcat(ubuff, f);
+            }
+        }
+    }
+    
 
     Serial.print("ubuff: "); Serial.println(ubuff);
 
