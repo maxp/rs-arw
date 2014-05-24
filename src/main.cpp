@@ -8,7 +8,6 @@
 
 #define VERSION "rs_arw 0.2"
 
-#include <math.h>
 #include <Wire.h>
 #include <Adafruit_BMP085.h>
 #include <dht.h>
@@ -31,14 +30,13 @@ Dht dht;
 #define HOST      "rs.angara.net"
 #define PORT       80
 #define BASE_URI  "/dat?"
-// #define SECRET    "$$$"
 
 #define APN   ""
 #define USER  ""
 #define PASS  ""
 
 // !!! 30
-#define SEC10_NUM 3
+#define SEC10_NUM 2
 
 // 203, 152, 352, 368, 489, 435, 806, 758
 // 987, 929, 959, 855, 904, 620, 672, 186
@@ -73,7 +71,6 @@ int   gust, va_min, va_max, rh[RHN];
 #include <SoftwareSerial.h>
 #include "SIM900.h"
 #include "inetGSM.h"
-// #include "sha1.h"
 
 InetGSM inet;
 
@@ -91,17 +88,29 @@ char ubuff[UBUFF_LEN];
 
 //
 
+void blink(int n) 
+{
+    delay(200);
+    for(int i=0; i<n; i++) {
+        digitalWrite(BLINK_PIN, HIGH); delay(250);
+        digitalWrite(BLINK_PIN, LOW);  delay(250);
+    }
+}
 
 void setup()
 {
-  Serial.begin(9600);
-  Serial.println(VERSION);
-  pinMode(BLINK_PIN, OUTPUT);
+    Serial.begin(9600);
+    // while (!Serial) {} // Leonardo
 
-  digitalWrite(ANEM_PIN, HIGH);
-  digitalWrite(VANE_PIN, HIGH);
-  digitalWrite(PWR_PIN, HIGH);
-  digitalWrite(BAT_PIN, HIGH);
+    Serial.println(VERSION);
+    pinMode(BLINK_PIN, OUTPUT);
+
+    digitalWrite(ANEM_PIN, HIGH);
+    digitalWrite(VANE_PIN, HIGH);
+    digitalWrite(PWR_PIN, HIGH);
+    digitalWrite(BAT_PIN, HIGH);
+
+    blink(4);
 }
 
 
@@ -147,6 +156,7 @@ int read_anem()
     return count;
 }
 
+// GSM
 
 void sim_power() {
   pinMode(GSM_ON, OUTPUT);
@@ -214,7 +224,7 @@ void gsm_send(char* buff) {
   sim_reset();  
 }
 
-//
+// main loop
 
 void loop()
 {
@@ -246,11 +256,11 @@ void loop()
             h_sum += dht.humidity;    h_count++;
         }
 
-        if(bmp.begin()) 
-        {
-            p_sum += bmp.readPressure()/100.; p_count++;
-            t0_sum += bmp.readTemperature(); t0_count++;
-        }
+        // if(bmp.begin()) 
+        // {
+        //     p_sum += bmp.readPressure()/100.; p_count++;
+        //     t0_sum += bmp.readTemperature(); t0_count++;
+        // }
     }
 
     ubuff[0] = 0;
@@ -295,7 +305,7 @@ void loop()
             float m0 = float(rh[(mpos-1+RHN) % RHN]);
             float m1 = float(rh[(mpos+1) % RHN]);
 
-            int b = round((float(mpos)-(m0/m*0.5)+(m1/m*0.5))*22.5);
+            int b = int((float(mpos)-(m0/m*0.5)+(m1/m*0.5))*22.5);
             strcat(ubuff, "&b="); itoa(b, f, 10); strcat(ubuff, f);
 
             strcat(ubuff, "&rh=");
@@ -309,8 +319,10 @@ void loop()
 
     Serial.print("ubuff: "); Serial.println(ubuff);
 
-    // gsm_send(ubuff);
-   
+    blink(2);
+
+    gsm_send(ubuff);
+
 }
 
 //.
