@@ -25,7 +25,7 @@
 #endif
 // if defined - debug print is enabled with possibility to print out 
 // debug texts to the terminal program
-//#define DEBUG_PRINT
+// #define DEBUG_PRINT
 
 // if defined - debug print is enabled with possibility to print out 
 // the data recived from gsm module

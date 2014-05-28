@@ -44,6 +44,9 @@ int GSM::begin(long baud_rate){
 	int cont=0;
 	boolean norep=false;
 	boolean turnedON=false;
+
+    Serial.println("gsm.begin");
+    
 	SetCommLineStatus(CLS_ATCMD);
 	_cell.begin(baud_rate);
 	setStatus(IDLE); 

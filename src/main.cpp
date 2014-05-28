@@ -180,7 +180,8 @@ void sim_reset() {
 
 // #include "sms.h"
 
-void gsm_send(char* buff) {
+void gsm_send(char* buff) 
+{
   gsm.begin(9600);
   
   // SMSGSM sms;
@@ -321,7 +322,7 @@ void loop()
 
     blink(2);
 
-    gsm_send(ubuff);
+    // gsm_send(ubuff);
 
 }
 

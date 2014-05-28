@@ -47,7 +47,7 @@ int SIMCOM900::imei()
     WaitResp(3000, 100, "OK");
     Serial.print("comm_buff:"); 
     for(int i = 0; i<30; i++) {
-	Serial.print(" "); Serial.print(gsm.comm_buf[i], HEX);
+	     Serial.print(" "); Serial.print(gsm.comm_buf[i], HEX);
     }
     Serial.println("==");
 }
