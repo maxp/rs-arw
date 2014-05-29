@@ -1,16 +1,76 @@
+//
+//  Angara.Net weather station sensor
+//
+//  DHT-22, BMP180, Wind vane, Anemometer, Arduino Leonardo, TinySine SIM900, IPS SKAT
+//  http://github.com/maxp/rs_arw
+//
 
 
+#define VERSION "rs_arw 0.3"
+
+#include <Wire.h>
+#include <Adafruit_BMP085.h>
+#include <dht.h>
+
+Adafruit_BMP085 bmp;
+dht dh;
+
+// pin0,pin1 - hardware Serial1
+
+#define BLINK_PIN    13
+#define DHT22_PIN    6
+#define GSM_PWR_PIN  8
+
+#define VANE_PIN A0
+#define ANEM_PIN A1
+#define PWR_PIN  A2
+#define BAT_PIN  A3
+
+#define ANEM_INTERVAL 10
+#define ANEM_ALEVEL   500
+#define PWRBAT_ALEVEL 90
+
+#define HOST      "rs.angara.net"
+#define PORT      "80"
+#define BASE_URI  "/dat?"
+
+#define APN   ""
+#define USER  ""
+#define PASS  ""
+
+// !!! 30
+#define SEC10_NUM 2
+
+
+
+// 203, 152, 352, 368, 489, 435, 806, 758
+// 987, 929, 959, 855, 904, 620, 672, 186
+
+#define RHN 16
+
+int RH0[RHN] = {
+    193, 120, 300, 361, 460, 400, 780, 700,
+    970, 920, 940, 840, 880, 600, 650, 166
+};
+
+int RH1[RHN] = {
+    250, 165, 360, 399, 500, 459, 839, 779,
+    999, 939, 969, 879, 919, 649, 699, 192
+};
+
+
+int   cycle = 0;
+
+float t_sum,   h_sum,   p_sum,   w_sum,   t0_sum; 
+int   t_count, h_count, p_count, w_count, t0_count;
+int   gust, va_min, va_max, rh[RHN];
 
 
 #define RBUFF_LEN 80
 #define UBUFF_LEN 220
 
-#define GSM_PWR_PIN  8
 
 #define GsmPort  Serial1
-
-#define HOST "rs.angara.net"
-#define PORT "80"
 
 #define TCP_TIMEOUT 10
 
@@ -18,8 +78,7 @@
 #define USER ""
 #define PASS ""
 
-
-#define CSTT "AT+CSTT=\""APN"\",\""USER"\",\""PASS"\""
+#define CSTT     "AT+CSTT=\""APN"\",\""USER"\",\""PASS"\""
 #define CIPSTART "AT+CIPSTART=\"TCP\",\""HOST"\","PORT
 
 
@@ -27,16 +86,74 @@ char rbuff[RBUFF_LEN];
 char ubuff[UBUFF_LEN];
 
 
+void blink(int n) 
+{
+    delay(200);
+    for(int i=0; i<n; i++) {
+        digitalWrite(BLINK_PIN, HIGH); delay(250);
+        digitalWrite(BLINK_PIN, LOW);  delay(250);
+    }
+}
+
 void setup()
 {
     Serial.begin(9600);
     GsmPort.begin(9600);
     
-    pinMode(13, OUTPUT); 
-    digitalWrite(13, HIGH); delay(3000); 
-    digitalWrite(13, LOW); delay(2000);
+    Serial.println(VERSION);
+    pinMode(BLINK_PIN, OUTPUT);
+
+    digitalWrite(ANEM_PIN, HIGH);
+    digitalWrite(VANE_PIN, HIGH);
+    digitalWrite(PWR_PIN, HIGH);
+    digitalWrite(BAT_PIN, HIGH);
 }
 
+// sensors
+
+int read_vane() 
+{
+    int a = analogRead(VANE_PIN); 
+
+    if(va_min == 0 || a < va_min) { va_min = a; }
+    if(a > va_max) { va_max = a; }
+
+    for( int i=0; i < RHN; i++ ) {
+        if(RH0[i] <= a && a < RH1[i]) { return i; }
+    }
+    return -1;
+}
+
+
+int read_anem() 
+{
+    int count = 0;
+    boolean high = false;
+    boolean blink = false;
+    for(int seconds=0; seconds < ANEM_INTERVAL; seconds++) 
+    {
+        digitalWrite(BLINK_PIN, HIGH);
+        // one second cycle
+        for(int dm=0; dm < 100; dm++) 
+        {
+            int v = analogRead(ANEM_PIN);
+            if(v > ANEM_ALEVEL) {
+                if(!high){ 
+                    high = true; 
+                    digitalWrite(BLINK_PIN, blink?HIGH:LOW); blink = !blink;
+                }
+            }
+            else {
+                if(high) { high = false; count++; }
+            }
+            delay(10);
+        }
+    }
+    digitalWrite(BLINK_PIN, LOW);
+    return count;
+}
+
+// gsm
 
 void gsm_pwr()
 {
@@ -57,7 +174,6 @@ void gsm_flush()
     }
     Serial.println("}.");
 }
-
 
 void gsm_send(char* s) 
 {
@@ -91,7 +207,6 @@ int gsm_recv(int timeout_sec)
     return i;
 }
 
-
 int gsm_cmd_ok(char* s, int timeout)
 {
     gsm_flush(); gsm_cmd(s);
@@ -107,7 +222,6 @@ int gsm_cmd_ok(char* s, int timeout)
     else { return 0; }
 }
 
-
 int check_pwr() 
 {
     if(gsm_cmd_ok("AT", 3)) { return 1; }
@@ -117,15 +231,114 @@ int check_pwr()
     return 0;
 }
 
+
+// read sensors
+
+void collect_data() 
+{
+    char f[20];
+
+    delay(500);
+    blink(4);
+    delay(500);
+    
+    cycle++;
+    Serial.print("cycle: "); Serial.println(cycle);
+
+    t_sum = h_sum = p_sum = w_sum = t0_sum = 0.;
+    t_count = h_count = p_count = w_count = t0_count = 0;
+
+    for(int i=0; i<RHN; i++) { rh[i] = 0; }
+    gust = va_min = va_max = 0;
+
+    for(int s10=0; s10 < SEC10_NUM; s10++) 
+    {
+        int w = read_anem(); // delay 10 seconds
+        if(w > gust) { gust = w; }
+        w_sum += w; w_count++;
+
+        int r = read_vane();
+        if( r >= 0 ) {
+            rh[r] += 1;
+        }
+
+        if(dh.read22(DHT22_PIN) == DHTLIB_OK)   
+        {
+            t_sum += dh.temperature; t_count++;
+            h_sum += dh.humidity;    h_count++;
+        }
+
+        if(bmp.begin()) 
+        {
+            p_sum += bmp.readPressure()/100.; p_count++;
+            t0_sum += bmp.readTemperature(); t0_count++;
+        }
+    }
+
+    ubuff[0] = 0;
+    itoa(cycle, f, 10); strcat(ubuff, "cycle="); strcat(ubuff, f);
+
+    int pwr = 0;
+    if( analogRead(PWR_PIN) > PWRBAT_ALEVEL) { pwr += 1; }; // pwr == 1: no external power
+    if( analogRead(BAT_PIN) > PWRBAT_ALEVEL) { pwr += 2; }; // pwr == 2: battery failure
+    if(pwr) { itoa(pwr, f, 10); strcat(ubuff, "&pwr="); strcat(ubuff, f); }
+
+    if(t_count) { 
+        dtostrf(t_sum/t_count, 3, 1, f); strcat(ubuff, "&t="); strcat(ubuff, f);
+    }
+    if(h_count) { 
+        dtostrf(h_sum/h_count, 3, 1, f); strcat(ubuff, "&h="); strcat(ubuff, f);
+    }
+    if(p_count) { 
+        dtostrf(p_sum/p_count, 3, 1, f); strcat(ubuff, "&p="); strcat(ubuff, f);
+    }
+    if(t0_count){ 
+        dtostrf(t0_sum/t0_count, 3, 1, f); strcat(ubuff, "&t0="); strcat(ubuff, f);
+    }
+    if(w_count) { 
+        dtostrf(w_sum/w_count, 3, 1, f); strcat(ubuff, "&w="); strcat(ubuff, f);
+    }
+    if(gust) { itoa(gust, f, 10); strcat(ubuff, "&g="); strcat(ubuff, f); }
+
+    if(va_min || va_max) {
+        strcat(ubuff, "&va_mm="); itoa(va_min, f, 10); strcat(ubuff, f);
+        strcat(ubuff, ","); itoa(va_max, f, 10); strcat(ubuff, f);
+    }
+
+    if(w_sum || gust) 
+    {
+        int mpos = -1, mw = 0;
+        for(int i=0; i < RHN; i++) { if(rh[i] > mw) { mw = rh[i]; mpos = i; } }
+        if(mpos >= 0) {
+            float m  = float(mw);
+            float m0 = float(rh[(mpos-1+RHN) % RHN]);
+            float m1 = float(rh[(mpos+1) % RHN]);
+
+            int b = int((float(mpos)-(m0/m*0.5)+(m1/m*0.5))*22.5);
+            strcat(ubuff, "&b="); itoa(b, f, 10); strcat(ubuff, f);
+
+            strcat(ubuff, "&rh=");
+            for(int i=0; i<RHN; i++) { 
+                if(i) { strcat(ubuff, ","); }
+                itoa(rh[i], f, 10); strcat(ubuff, f);
+            }
+        }
+    }
+
+    Serial.print("ubuff: "); Serial.println(ubuff);
+}
+
+//
+
 void loop()
 {
-  
-    // collect_data(); -> ubuff
+    collect_data();
     
-    
-    strcpy(ubuff, "cycle=999");
+    // send 
 
-    // gprs
+    delay(500);
+    blink(2);
+    delay(500);
     
     if( check_pwr() ) {
         Serial.println("pwr_ok");  
@@ -136,9 +349,6 @@ void loop()
 
         strcat(ubuff,"&hwid="); strncat(ubuff, rbuff, 20);
 
-        Serial.print("ubuff:"); Serial.println(ubuff);
-        delay(3000);
-        
         gsm_cmd_ok("at+cipshut", 3);
         gsm_cmd_ok(CSTT, 3); 
         gsm_cmd_ok("at+ciicr", 3);
@@ -153,7 +363,7 @@ void loop()
 
         gsm_cmd_ok("at+cipsend", 3);
         
-        gsm_send("GET /dat?"); gsm_send(ubuff); gsm_send(" HTTP/1.0\r\n");
+        gsm_send("GET "); gsm_send(BASE_URI); gsm_send(ubuff); gsm_send(" HTTP/1.0\r\n");
         gsm_send("Host: "); gsm_send(HOST); gsm_send("\r\n\r\n");
         gsm_send("\x1a"); // Ctrl-Z
         
@@ -164,11 +374,7 @@ void loop()
         gsm_cmd_ok("at+cipshut", 3);
         // at+cgatt=0
         
-
-        delay(8000);
-        
-        // while(1) { commands(); }
-        
+        // done.
     }
     else {
         Serial.println("no power");
@@ -177,128 +383,5 @@ void loop()
     
 }
 
+//.
 
-// +HTTPINIT
-// AT+HTTPPARA="URL","www.google.com"
-// AT+HTTPACTION=0
-// AT+HTTPREAD
-
-/*
-
-  at+cipstatus
-  
-  at+cipshut
-  at+cstt="internet.mts.ru","mts","mts"
-  at+ciicr
-  at+cifsr
-  
-  at+cipstart="TCP","rs.angara.net",80
-  
-  
-  CONNECT OK
-  
-  at+cipsend
-  
-  at+cgatt=0
-  
-  
-  AT+CSTT="internet"
-  AT+CIICR
-  AT+CIFSR
-  AT+CIPSPRT=0
-  
-  AT+CIPSTART="tcp","rs.angara.net","80"
-  
-  = OK
-  = CONNECT OK
-  
-  AT+CIPSEND
-  
-  GET /dat?..... HTTP/1.0\n
-  Host: rs.angara.net\n
-  \n
-  ^Z
-  
-  AT+CIPCLOSE
-
-  
-  mySerial.println("AT+CGATT?");
-  delay(1000);
- 
-  ShowSerialData();
- 
-  mySerial.println("AT+CSTT=\"CMNET\"");//start task and setting the APN,
-  delay(1000);
- 
-  ShowSerialData();
- 
-  mySerial.println("AT+CIICR");//bring up wireless connection
-  delay(3000);
- 
-  ShowSerialData();
- 
-  mySerial.println("AT+CIFSR");//get local IP adress
-  delay(2000);
- 
-  ShowSerialData();
- 
-  mySerial.println("AT+CIPSPRT=0");
-  delay(3000);
- 
-  ShowSerialData();
- 
-  mySerial.println("AT+CIPSTART=\"tcp\",\"api.cosm.com\",\"8081\"");//start up the connection
-  delay(2000);
- 
-  ShowSerialData();
- 
-  mySerial.println("AT+CIPSEND");
-  delay(4000);
-  ShowSerialData();
-  String humidity = "1031";//these 4 line code are imitate the real sensor data, because the demo did't add other sensor, so using 4 string variable to replace.
-  String moisture = "1242";//you can replace these four variable to the real sensor data in your project
-  String temperature = "30";//
-  String barometer = "60.56";//
-  mySerial.print("{\"method\": \"put\",\"resource\": \"/feeds/42742/\",\"params\"");//here is the feed you apply from pachube
-  delay(500);
-  ShowSerialData();
-  mySerial.print(": {},\"headers\": {\"X-PachubeApiKey\":");//in here, you should replace your pachubeapikey
-  delay(500);
-  ShowSerialData();
-  mySerial.print(" \"_cXwr5LE8qW4a296O-cDwOUvfddFer5pGmaRigPsiO0");//pachubeapikey
-  delay(500);
-  ShowSerialData();
-  mySerial.print("jEB9OjK-W6vej56j9ItaSlIac-hgbQjxExuveD95yc8BttXc");//pachubeapikey
-  delay(500);
-  ShowSerialData();
-  mySerial.print("Z7_seZqLVjeCOmNbEXUva45t6FL8AxOcuNSsQS\"},\"body\":");
-  delay(500);
-  ShowSerialData();
-  mySerial.print(" {\"version\": \"1.0.0\",\"datastreams\": ");
-  delay(500);
-  ShowSerialData();
-  mySerial.println("[{\"id\": \"01\",\"current_value\": \"" + barometer + "\"},");
-  delay(500);
-  ShowSerialData();
-  mySerial.println("{\"id\": \"02\",\"current_value\": \"" + humidity + "\"},");
-  delay(500);
-  ShowSerialData();
-  mySerial.println("{\"id\": \"03\",\"current_value\": \"" + moisture + "\"},");
-  delay(500);
-  ShowSerialData();
-  mySerial.println("{\"id\": \"04\",\"current_value\": \"" + temperature + "\"}]},\"token\": \"lee\"}");
- 
- 
-  delay(500);
-  ShowSerialData();
- 
-  mySerial.println((char)26);//sending
-  delay(5000);//waitting for reply, important! the time is base on the condition of internet 
-  mySerial.println();
- 
-  ShowSerialData();
- 
-  mySerial.println("AT+CIPCLOSE");//close the connection
-  delay(100);
-  ShowSerialData();
-*/
