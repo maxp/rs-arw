@@ -38,9 +38,7 @@ dht dh;
 #define USER  ""
 #define PASS  ""
 
-// !!! 30
-#define SEC10_NUM 3
-
+#define SEC10_NUM 30
 
 // 203, 152, 352, 368, 489, 435, 806, 758
 // 987, 929, 959, 855, 904, 620, 672, 186
