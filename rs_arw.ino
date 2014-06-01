@@ -6,7 +6,7 @@
 //
 
 
-#define VERSION "rs_arw 0.3"
+#define VERSION "rs_arw 0.4"
 
 #include <Wire.h>
 #include <Adafruit_BMP085.h>
@@ -39,8 +39,7 @@ dht dh;
 #define PASS  ""
 
 // !!! 30
-#define SEC10_NUM 2
-
+#define SEC10_NUM 3
 
 
 // 203, 152, 352, 368, 489, 435, 806, 758
@@ -69,18 +68,21 @@ int   gust, va_min, va_max, rh[RHN];
 #define RBUFF_LEN 80
 #define UBUFF_LEN 220
 
-
 #define GsmPort  Serial1
 
 #define TCP_TIMEOUT 10
+#define SEND_RETRY  3
 
-#define APN  "internet"
+#define APN  ""
 #define USER ""
 #define PASS ""
 
 #define CSTT     "AT+CSTT=\""APN"\",\""USER"\",\""PASS"\""
 #define CIPSTART "AT+CIPSTART=\"TCP\",\""HOST"\","PORT
 
+#define IMEI_LEN 20
+
+char imei[IMEI_LEN];
 
 char rbuff[RBUFF_LEN];
 char ubuff[UBUFF_LEN];
@@ -107,6 +109,8 @@ void setup()
     digitalWrite(VANE_PIN, HIGH);
     digitalWrite(PWR_PIN, HIGH);
     digitalWrite(BAT_PIN, HIGH);
+    
+    imei[0] = 0;
 }
 
 // sensors
@@ -165,14 +169,14 @@ void gsm_pwr()
 
 void gsm_flush() 
 {
-    Serial.print("flush:{");
+    Serial.print("drop: ");
     delay(100);
     while(GsmPort.available()){ 
         char c = GsmPort.read();
         Serial.print(c);
         delay(1);    
     }
-    Serial.println("}.");
+    Serial.println();
 }
 
 void gsm_send(char* s) 
@@ -182,19 +186,20 @@ void gsm_send(char* s)
 
 void gsm_cmd(char* s) 
 {
-    Serial.print("send:"); Serial.print(s); Serial.println();  
+    Serial.print("send: "); Serial.print(s); Serial.println();  
     gsm_send(s); gsm_send("\r");
 }
 
 int gsm_recv(int timeout_sec) 
 {
+    Serial.print("recv: ");
     int i=0;
     for(; i < RBUFF_LEN; i++ ) {
-        unsigned char c = 0;
+        char c = 0;
         for(int t=0; t < timeout_sec*1000; t++ ) {
             if(GsmPort.available()) { 
                 c = GsmPort.read(); 
-                Serial.print(" *"); Serial.print((int)c); Serial.print(" ");
+                Serial.print(c);
                 break; 
             }
             else { delay(1); }
@@ -204,6 +209,7 @@ int gsm_recv(int timeout_sec)
     }
     if(i > 0 && rbuff[i-1] == '\r') { i--; }
     rbuff[i] = 0;
+    Serial.println();
     return i;
 }
 
@@ -212,22 +218,20 @@ int gsm_cmd_ok(char* s, int timeout)
     gsm_flush(); gsm_cmd(s);
     int n = gsm_recv(timeout);
     if(!n) { n = gsm_recv(timeout); } // skip empty line
-    
-    Serial.print("recv:"); Serial.print((char*)rbuff); Serial.println();
-    
-    if(rbuff[0] == 'O' && rbuff[1] == 'K' && rbuff[2] == 0) { 
-        Serial.println("got ok");
-        return 1; 
-    }
+    if(rbuff[0] == 'O' && rbuff[1] == 'K' && rbuff[2] == 0) { return 1; }
     else { return 0; }
 }
 
 int check_pwr() 
 {
-    if(gsm_cmd_ok("AT", 3)) { return 1; }
+    // if(gsm_cmd_ok("AT", 3)) { return 1; }
     gsm_pwr();
     gsm_cmd_ok("ATE0", 1);
-    if(gsm_cmd_ok("AT", 3)) { return 1; }
+    if(gsm_cmd_ok("AT", 3)) { 
+      Serial.println("gsm on.");
+      return 1; 
+    }
+    Serial.println("gsm off.");
     return 0;
 }
 
@@ -237,13 +241,9 @@ int check_pwr()
 void collect_data() 
 {
     char f[20];
-
-    delay(500);
-    blink(4);
-    delay(500);
-    
+ 
     cycle++;
-    Serial.print("cycle: "); Serial.println(cycle);
+    Serial.print("\r\ncycle: "); Serial.println(cycle);
 
     t_sum = h_sum = p_sum = w_sum = t0_sum = 0.;
     t_count = h_count = p_count = w_count = t0_count = 0;
@@ -277,6 +277,7 @@ void collect_data()
 
     ubuff[0] = 0;
     itoa(cycle, f, 10); strcat(ubuff, "cycle="); strcat(ubuff, f);
+    if(imei[0]) { strcat(ubuff, "&hwid="); strcat(ubuff, imei); }
 
     int pwr = 0;
     if( analogRead(PWR_PIN) > PWRBAT_ALEVEL) { pwr += 1; }; // pwr == 1: no external power
@@ -325,62 +326,62 @@ void collect_data()
         }
     }
 
-    Serial.print("ubuff: "); Serial.println(ubuff);
+    Serial.print("data: "); Serial.println(ubuff);
 }
 
 //
 
 void loop()
 {
+    delay(100);
+    blink(4);
+    delay(200);
+
     collect_data();
     
     // send 
-
-    delay(500);
+    
     blink(2);
-    delay(500);
     
     if( check_pwr() ) {
-        Serial.println("pwr_ok");  
-        
-        gsm_cmd("AT+GSN");
-        gsm_recv(1); gsm_recv(1);
-        Serial.print("imei:"); Serial.println(rbuff);
+      
+        for( int retry=0; retry < SEND_RETRY; retry++ )
+        {
+            if(!imei[0]) {
+                gsm_cmd("AT+GSN");
+                gsm_recv(1); gsm_recv(1);
+                Serial.print("imei:"); Serial.println(rbuff);
+                strncpy(imei, rbuff, 20);
+                if(imei[0]) { strcat(ubuff,"&hwid="); strcat(ubuff, imei); }
+            }
 
-        strcat(ubuff,"&hwid="); strncat(ubuff, rbuff, 20);
+            // gsm_cmd_ok("at+cipshut", 3);
+            gsm_cmd_ok(CSTT, 3); 
+            gsm_cmd_ok("at+ciicr", 3);
+            gsm_cmd_ok("at+cifsr", 3);
+            gsm_cmd_ok(CIPSTART, 3);
+            gsm_recv(TCP_TIMEOUT);
+        
+            if( strcmp(rbuff, "CONNECT OK") ) { Serial.println("connected"); }
 
-        gsm_cmd_ok("at+cipshut", 3);
-        gsm_cmd_ok(CSTT, 3); 
-        gsm_cmd_ok("at+ciicr", 3);
-        gsm_cmd_ok("at+cifsr", 3);
-        gsm_cmd_ok(CIPSTART, 3);
-
-        gsm_recv(TCP_TIMEOUT);
+            gsm_cmd_ok("at+cipsend", 3);
         
-        if( strcmp(rbuff, "CONNECT OK") ) {
-            Serial.println("connected");
-        }
-
-        gsm_cmd_ok("at+cipsend", 3);
+            gsm_send("GET "); gsm_send(BASE_URI); gsm_send(ubuff); gsm_send(" HTTP/1.0\r\n");
+            gsm_send("Host: "); gsm_send(HOST); gsm_send("\r\n\r\n");
+            gsm_send("\x1a"); // Ctrl-Z
         
-        gsm_send("GET "); gsm_send(BASE_URI); gsm_send(ubuff); gsm_send(" HTTP/1.0\r\n");
-        gsm_send("Host: "); gsm_send(HOST); gsm_send("\r\n\r\n");
-        gsm_send("\x1a"); // Ctrl-Z
-        
-        gsm_recv(TCP_TIMEOUT);
-        gsm_recv(TCP_TIMEOUT);
-        Serial.print("response:"); Serial.println(rbuff);
-  
-        gsm_cmd_ok("at+cipshut", 3);
-        // at+cgatt=0
-        
-        // done.
+            gsm_recv(TCP_TIMEOUT);
+            gsm_recv(TCP_TIMEOUT);
+            Serial.print("resp: "); Serial.println(rbuff);
+            
+            boolean send_ok = (strcmp(rbuff, "SEND OK") == 0);
+            gsm_cmd_ok("at+cipshut", 3);
+            
+            if(send_ok) { Serial.println("send_ok."); break; }
+        }        
+        gsm_pwr();
     }
-    else {
-        Serial.println("no power");
-        delay(1000);
-    }
-    
+ 
 }
 
 //.
