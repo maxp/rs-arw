@@ -6,8 +6,9 @@
 //
 
 
-#define VERSION "rs_arw 0.4"
+#define VERSION "rs_arw 0.5"
 
+#include <SoftwareSerial.h>
 #include <Wire.h>
 #include <Adafruit_BMP085.h>
 #include <dht.h>
@@ -15,7 +16,8 @@
 Adafruit_BMP085 bmp;
 dht dh;
 
-// pin0,pin1 - hardware Serial1
+// pin0,pin1 - hardware Serial1 (Leonardo)
+// pin2,pin3 - SoftwareSerial (Pro)
 
 #define BLINK_PIN    13
 #define DHT22_PIN    6
@@ -23,12 +25,12 @@ dht dh;
 
 #define VANE_PIN A0
 #define ANEM_PIN A1
-#define PWR_PIN  A2
-#define BAT_PIN  A3
+// #define PWR_PIN  A2
+// #define BAT_PIN  A3
 
 #define ANEM_INTERVAL 10
 #define ANEM_ALEVEL   500
-#define PWRBAT_ALEVEL 90
+// #define PWRBAT_ALEVEL 90
 
 #define HOST      "rs.angara.net"
 #define PORT      "80"
@@ -38,7 +40,8 @@ dht dh;
 #define USER  ""
 #define PASS  ""
 
-#define SEC10_NUM 30
+#define SEC10_NUM 3
+// !!! 30
 
 // 203, 152, 352, 368, 489, 435, 806, 758
 // 987, 929, 959, 855, 904, 620, 672, 186
@@ -66,7 +69,8 @@ int   gust, va_min, va_max, rh[RHN];
 #define RBUFF_LEN 80
 #define UBUFF_LEN 220
 
-#define GsmPort  Serial1
+// #define GsmPort  Serial1
+SoftwareSerial GsmPort(2,3);
 
 #define TCP_TIMEOUT 10
 #define SEND_RETRY  3
@@ -105,8 +109,8 @@ void setup()
 
     digitalWrite(ANEM_PIN, HIGH);
     digitalWrite(VANE_PIN, HIGH);
-    digitalWrite(PWR_PIN, HIGH);
-    digitalWrite(BAT_PIN, HIGH);
+//    digitalWrite(PWR_PIN, HIGH);
+//    digitalWrite(BAT_PIN, HIGH);
     
     imei[0] = 0;
 }
@@ -277,10 +281,10 @@ void collect_data()
     itoa(cycle, f, 10); strcat(ubuff, "cycle="); strcat(ubuff, f);
     if(imei[0]) { strcat(ubuff, "&hwid="); strcat(ubuff, imei); }
 
-    int pwr = 0;
-    if( analogRead(PWR_PIN) > PWRBAT_ALEVEL) { pwr += 1; }; // pwr == 1: no external power
-    if( analogRead(BAT_PIN) > PWRBAT_ALEVEL) { pwr += 2; }; // pwr == 2: battery failure
-    if(pwr) { itoa(pwr, f, 10); strcat(ubuff, "&pwr="); strcat(ubuff, f); }
+//    int pwr = 0;
+//    if( analogRead(PWR_PIN) > PWRBAT_ALEVEL) { pwr += 1; }; // pwr == 1: no external power
+//    if( analogRead(BAT_PIN) > PWRBAT_ALEVEL) { pwr += 2; }; // pwr == 2: battery failure
+//    if(pwr) { itoa(pwr, f, 10); strcat(ubuff, "&pwr="); strcat(ubuff, f); }
 
     if(t_count) { 
         dtostrf(t_sum/t_count, 3, 1, f); strcat(ubuff, "&t="); strcat(ubuff, f);
@@ -294,10 +298,14 @@ void collect_data()
     if(t0_count){ 
         dtostrf(t0_sum/t0_count, 3, 1, f); strcat(ubuff, "&t0="); strcat(ubuff, f);
     }
+    
+    // 10 seconds wind counters
     if(w_count) { 
-        dtostrf(w_sum/w_count, 3, 1, f); strcat(ubuff, "&w="); strcat(ubuff, f);
+        dtostrf(0.1*w_sum/w_count, 3, 1, f); strcat(ubuff, "&w="); strcat(ubuff, f);
     }
-    if(gust) { itoa(gust, f, 10); strcat(ubuff, "&g="); strcat(ubuff, f); }
+    if(gust) { 
+        dtostrf(0.1*gust, 3, 1, f); strcat(ubuff, "&g="); strcat(ubuff, f); 
+    }
 
     if(va_min || va_max) {
         strcat(ubuff, "&va_mm="); itoa(va_min, f, 10); strcat(ubuff, f);
