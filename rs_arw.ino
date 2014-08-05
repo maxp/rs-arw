@@ -6,7 +6,7 @@
 //
 
 
-#define VERSION "rs_arw 0.5"
+#define VERSION "rs_arw 0.5.1"
 
 #include <SoftwareSerial.h>
 #include <Wire.h>
@@ -42,6 +42,8 @@ dht dh;
 
 #define SEC10_NUM 30
 
+// pullup 5k +5V: VANE_PIN
+//
 // 203, 152, 352, 368, 489, 435, 806, 758
 // 987, 929, 959, 855, 904, 620, 672, 186
 
@@ -106,6 +108,8 @@ void setup()
     Serial.println(VERSION);
     pinMode(BLINK_PIN, OUTPUT);
 
+    pinMode(DHT22_PIN, INPUT_PULLUP);
+    
     digitalWrite(ANEM_PIN, HIGH);
     digitalWrite(VANE_PIN, HIGH);
 //    digitalWrite(PWR_PIN, HIGH);
